@@ -1,0 +1,113 @@
+vulkan环境的创建过程和OpenCL很像，都是先搜索我们所允许的硬件平台上有哪些支持vulkan的设备（该过程程序员是通过调用库来查看的，而库则会通过系统中的设备驱动来判断设备是否支持vulkan，如果没有找到可以支持vulkan的设备，可以试着更新一下设备驱动）
+
+首先是对我们运行的平台做一个抽象，我们把我们运行的平台抽象成一个instance，在这个instance上可能有多个physical devices（GPUs），我们需要选择一个满足我们计算性能要求的physical device来使用。对应于我们选定的physical device，我们需要创建一个logical device，然后我们就可以在这个logical device上做一些操作。
+
+在一个physical device上，我们的要让physical device做一些操作，都是需要把命令通过queue传递过去的。不同的physical device会提供不同的类型的queue，即不同的queue支持传输的命令类型也不一样，所以在选择physical device的过程中，我们就要选择那些满足我们使用需要的physical device。
+
+所以整个使用vulkan的准备过程分为如下几步：
+createInstance();
+pickPhysicalDevice();
+createLogicalDevice();
+
+void createInstance()
+{
+	/* 配置application info */
+	VkApplicationInfo appInfo = {};
+	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+	appInfo.pApplicationName = "Hello, kaito";
+	appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+	appInfo.pEngineName = "No Engine";
+	appInfo.apiVersion = VK_API_VERSION_1_0;
+
+	/* 配置instance create info */
+	VkInstanceCreateInfo instanceInfo = {};
+	instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	instanceInfo.pApplicationInfo = &appInfo;
+
+	/* 创建一个instance */
+	if (vkCreateInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS)
+		throw std::runtime_error("failed to create vulkan instance!");
+}
+
+============================================================================
+void pickPhysicalDevice()
+{
+	/* 获取该instance上的所有physical device，和OpenCL的步骤一样 */
+	uint32_t physicalDeviceCount;
+	vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);
+	std::vector<VkPhysicalDevice> physicalDevices(physicalDeviceCount);
+	vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices.data());
+
+	/* 此步骤是检测有哪些physical device是满足我们的使用需求的，我们选择第一个出现的满足使用需求的physical device */
+	for (const auto& device : physicalDevices)
+	{
+		if (isDeviceSuitable(device))
+		{
+			physicalDevice = device;
+			break;
+		}
+	}
+
+	if (physicalDevice == VK_NULL_HANDLE)
+		throw std::runtime_error("failed to find a suitable GPU!");
+}
+
+============================================================================
+void createLogicalDevice()
+{
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+	/* 在创建logical device的配置信息中需要queue family的信息 */
+	VkDeviceQueueCreateInfo queueCreateInfo = {};
+	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queueCreateInfo.queueFamilyIndex = indices.graphicFamily;
+	queueCreateInfo.queueCount = 1;
+
+	float queuePriority = 1.0f;
+	queueCreateInfo.pQueuePriorities = &queuePriority;
+
+	VkPhysicalDeviceFeatures deviceFeatures = {};
+
+	/* 配置创建logical device的信息 */
+	VkDeviceCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	createInfo.pQueueCreateInfos = &queueCreateInfo;
+	createInfo.queueCreateInfoCount = 1;
+	createInfo.pEnabledFeatures = &deviceFeatures;
+	createInfo.enabledExtensionCount = 0;
+	createInfo.enabledLayerCount = 0;
+
+	/* 对应到一个physical device，创建一个logical device */
+	if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
+		throw std::runtime_error("failed to create logical device!");
+
+	vkGetDeviceQueue(device, indices.graphicFamily, 0, &graphicQueue);
+}
+
+
+============================================================================
+============================================================================
+============================================================================
+
+至此，我们已经成功选择了一个physical device，并且在它上面创建了一个logical device
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,36 @@
+Vertex input
+描述顶点数据格式
+VkPipelineVertexInputStateCreateInfo
+该结构体数据传递到vertex shader中
+
+Input assembly
+描述顶点数据以书面类型的集合拓扑进行绘制，以及是否采用顶点重新开始图元
+VkPipelineInputAssemblyStateCreateInfo
+
+
+Viewport and scissors
+viewport描述framebuffer作为渲染输出结果目标区域，scissors用于定义裁剪矩形
+VkViewport, VkRect2D
+VkPipelineViewportStateCreateInfo，该结构体把viewport和scissors联合使用
+
+Rasterization
+光栅化通过顶点着色器及具体的几何算法将顶点进行塑形，并将图形传递到片段着色器进行着色工作
+VkPipelineRasterizationStateCreateInfo
+
+Multisampling
+多重采样，是抗锯齿（anti-aliasing）的一种实现，通过组合多个多边形的片段着色器结果，光栅化到同一个像素
+VkPipelineMultisampleStateCreateInfo
+
+Depth and stencil testing
+VkPipelineDepthStencilStateCreateInfo
+
+Color blending
+fragment shader输出具体的颜色，它需要与帧缓冲区framebuffer中已经存在的颜色进行混合
+VkPipelineColorBlendAttachmentState包括了每个附加到帧缓冲区的配置
+VkPipelineColorBlendStateCreateInfo包含了全局混色的设置
+
+Dynamic state
+之前创建的一些结构体的状态可以在运行时动态修改，而不必重新创建
+VkPipelineDynamicStateCreateInfo
+
+Pipeline layout
