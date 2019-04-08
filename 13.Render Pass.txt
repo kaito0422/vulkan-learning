@@ -1,0 +1,56 @@
+/* 创建Render Pass */ 
+	// 在完成pipeline创建工作之前，我们需要告诉vulkan渲染时使用的framebuffer帧缓冲区附件相关信息（比如多少个颜色和深度缓冲区会被使用，多少个采样器）
+	// 这些信息都被封装在Render Pass中
+	void createRenderPass()
+	{
+		VkAttachmentDescription colorAttachment = {};						// 颜色缓冲区附件
+		colorAttachment.format = swapChainImageFormat;						// 颜色附件的格式，应该与交换链中图像的格式一致
+		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;					// 不使用多重采样
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		// loadOp和storeOp决定了渲染前和渲染后数据在对应附件的操作行为
+		// VK_ATTACHMENT_LOAD_OP_LOAD: 保存已经存在于当前附件的内容
+		// VK_ATTACHMENT_LOAD_OP_CLEAR : 起始阶段以一个常量清理附件内容
+		// VK_ATTACHMENT_LOAD_OP_DONT_CARE : 存在的内容未定义，忽略它们
+		// VK_ATTACHMENT_STORE_OP_STORE: 渲染的内容会存储在内存，并在之后进行读取操作
+		// VK_ATTACHMENT_STORE_OP_DONT_CARE : 帧缓冲区的内容在渲染操作完毕后设置为undefined
+		// loadOp和storeOp应用在颜色和深度数据
+		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		// stencilLoadOp / stencilStoreOp应用在模版数据
+		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		// 一些常用的布局：
+		// VK_IMAGE_LAYOUT_COLOR_ATTACHMET_OPTIMAL: 图像作为颜色附件
+		// VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : 图像在交换链中被呈现
+		// VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : 图像作为目标，用于内存COPY操作
+		// 一般意义上，我们理解CPU进行内存中的数据读写往往都是线性排序的linear memory layout，
+		// 但是在很多时候对于像素纹理数据的操作是非线性连续的，这种情景更多发生在GPU操作中
+		// 所以GPU硬件更多的支持基于(Tiled)平铺的或者成为最佳的内存布局结构，来提降低GPU处理数据的开销
+		// 所以从CPU linear layout内存数据到GPU optimal layout显存数据的读写往返之间存在数据存储格式的优化转变步骤
+		
+		VkAttachmentReference colorAttachmentRef = {};
+		colorAttachmentRef.attachment = 0;
+		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		VkSubpassDescription subpass = {};
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.colorAttachmentCount = 1;
+		subpass.pColorAttachments = &colorAttachmentRef;
+		// 可以被subpass引用的附件类型：
+		// pInputAttachments: 附件从着色器中读取
+		// pResolveAttachments : 附件用于颜色附件的多重采样
+		// pDepthStencilAttachment : 附件用于深度和模版数据
+		// pPreserveAttachments : 附件不被子通道使用，但是数据被保存	
+
+		VkRenderPassCreateInfo renderPassInfo = {};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		renderPassInfo.attachmentCount = 1;
+		renderPassInfo.pAttachments = &colorAttachment;
+		renderPassInfo.subpassCount = 1;
+		renderPassInfo.pSubpasses = &subpass;
+
+		if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
+			throw std::runtime_error("failed to create render pass!");
+
+	}

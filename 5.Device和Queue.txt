@@ -1,0 +1,368 @@
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include <iostream>
+#include <stdexcept>
+#include <functional>
+#include <vector>
+#include <map>
+#include <string.h>
+
+const int WIDTH = 800;
+const int HEIGHT = 600;
+
+// 预先设定的Validation Layer
+const std::vector<const char *> validationLayers = { "VK_LAYER_LUNARG_standard_validation" };
+
+#ifdef NDEBUG		// 配置宏来确定是否启用Validation Layer
+const bool enableValidationLayers = false;
+#else
+const bool enableValidationLayers = true;
+#endif
+
+struct QueueFamilyIndices {
+	int graphicsFamily = -1;
+
+	bool isComplete() {
+		return graphicsFamily >= 0;
+	}
+};
+
+class HelloTriangleApplication {
+public:
+	void run()
+	{
+		initWindow();
+		initVulkan();
+		mainLoop();
+		cleanup();
+	}
+
+private:
+	GLFWwindow *window;
+	VkInstance instance;
+	VkDebugReportCallbackEXT callback;	// 用于设置vulkan的回调函数
+	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;	// 用于保存选择的物理设备（显卡）
+
+	void initVulkan()
+	{
+		createInstance();
+	//	setupDebugCallback();
+		pickPhysicalDevice();
+	}
+
+	void mainLoop()
+	{
+		while (!glfwWindowShouldClose(window))
+		{
+			glfwPollEvents();
+		}
+	}
+
+	void cleanup()
+	{
+		vkDestroyInstance(instance, nullptr);
+		glfwDestroyWindow(window);
+
+		glfwTerminate();
+	}
+
+	void initWindow()
+	{
+		glfwInit();
+
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+		window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-kaito", nullptr, nullptr);
+	}
+
+	void createInstance()
+	{
+		// 检查是否启用Validation Layer，以及系统是否支持我们需要的Validation Layer
+		if (enableValidationLayers && !checkValidationLayerSupport())
+			throw std::runtime_error("validation layers requested, but not available!");
+
+		VkApplicationInfo appInfo = { };
+		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+		appInfo.pNext = nullptr;
+		appInfo.pApplicationName = "Hello kaito";			
+		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.pEngineName = "No Engine";
+		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.apiVersion = VK_API_VERSION_1_0;
+
+		VkInstanceCreateInfo inst_info = { };
+		inst_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+		inst_info.pApplicationInfo = &appInfo;
+
+		// 检查是否启用Validation Layer
+		if (enableValidationLayers)
+		{
+			inst_info.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+			inst_info.ppEnabledLayerNames = validationLayers.data();
+		}
+		else
+			inst_info.enabledLayerCount = 0;
+
+
+		// 当为GLFW window创建vulkan surface时，该函数返回一个vulkan instance扩展的字符串名称
+		// 函数返回glfwExtensionCount个字符串，每个字符串表示glfw支持的一种vulkan扩展的名字
+		//		unsigned int glfwExtensionCount = 0;
+		//		const char** glfwExtensions;
+		//		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		auto extensions = getRequiredExtensions();
+		inst_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());		// 填写函数返回得到的扩展信息
+		inst_info.ppEnabledExtensionNames = extensions.data();
+		// 显示glfw支持的扩展
+		std::cout << "glfw support extension number: " << inst_info.enabledExtensionCount << std::endl;
+		for(int i = 0; i < inst_info.enabledExtensionCount; i++)
+			std::cout <<  "\t" << i << " " << inst_info.ppEnabledExtensionNames[i] << std::endl;
+		
+		uint32_t vkExtNum = 0;
+		VkExtensionProperties *vkExtName;
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, nullptr);
+		vkExtName = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * vkExtNum);
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, vkExtName);
+		std::cout << "vulkan support extension number: " << vkExtNum << std::endl;
+		for(int i = 0; i < vkExtNum; i++)
+			std::cout << "\t" << i << " " << vkExtName[i].extensionName << std::endl;
+
+		VkResult res = vkCreateInstance(&inst_info, nullptr, &instance);
+		if (res != VK_SUCCESS)
+			throw std::runtime_error("failed to create instance!");
+		else
+			std::cout << "instance create success!" << std::endl;
+
+		free(vkExtName);
+	}
+
+	bool checkValidationLayerSupport()		// 检查系统是否支持我们预先设定的Validation Layer
+	{
+		uint32_t layerCount = 0;
+		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+		if (layerCount == 0)
+			return false;
+
+		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+		std::cout << "available Validation Layer:" << std::endl;
+		for (int i = 0; i < layerCount; i++)
+		{
+			std::cout << "\t" << i << " " << availableLayers[i].layerName;
+			for (int j = strlen(availableLayers[i].layerName); j < 33; j++)
+				std::cout << " ";
+			std::cout << "\t" << availableLayers[i].description << std::endl;
+		}
+
+		for (const char *layerName : validationLayers)
+		{
+			bool layerFound = false;
+
+			for(const auto& layerProperties : availableLayers)
+				if (strcmp(layerName, layerProperties.layerName) == 0)
+				{
+					layerFound = true;
+					break;
+				}
+
+			if (!layerFound)
+				return false;
+		}
+
+		return true;
+	}
+
+	std::vector<const char*> getRequiredExtensions()	// 获取glfw支持的extension
+	{
+		std::vector<const char*> extensions;
+
+		unsigned int glfwExtensionCount = 0;
+		const char** glfwExtensions;
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+		for (unsigned int i = 0; i < glfwExtensionCount; i++)
+			extensions.push_back(glfwExtensions[i]);
+
+		if (enableValidationLayers)
+			extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+
+		return extensions;
+	}
+
+	/*
+	* 该函数的作用是Validation Layer的回调函数，当Validation Layer发生检验错误时，应当调用该函数
+	* flags表示指定消息的类型(uint32_t)
+	*		VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+	*		VK_DEBUG_REPORT_WARNING_BIT_EXT
+	*		VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+	*		VK_DEBUG_REPORT_ERROR_BIT_EXT
+	*		VK_DEBUG_REPORT_DEBUG_BIT_EXT
+	* objType表示消息主体对象的类型，比如obj是VkPhysicalDevice，则objType就是VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT
+	函数返回一个布尔值，表示触发该校验错误时，是否该停止vulkan调用（一般总是返回VK_FALSE）
+	*/
+	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+		VkDebugReportFlagsEXT flags,			// 指定消息的类型
+		VkDebugReportObjectTypeEXT objType,		// 
+		uint64_t obj,
+		size_t location,
+		int32_t code,
+		const char* layerPrefix,
+		const char* msg,
+		void* userData)
+	{
+		std::cerr << "Validation Layer: " << msg << std::endl;
+
+		return VK_FALSE;
+	}
+
+	// 设置回调函数
+	void setupDebugCallback()
+	{
+		if (!enableValidationLayers) return;
+
+		VkDebugReportCallbackCreateInfoEXT createInfo = { };
+		createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+		createInfo.flags = VK_DEBUG_REPORT_DEBUG_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+		createInfo.pfnCallback = debugCallback;		// 设置为上面编写的回调函数
+		
+		if (CreateDebugReportCallbackExt(instance, &createInfo, nullptr, &callback) != VK_SUCCESS)
+			throw std::runtime_error("failed to set up debug callback!");
+	}
+
+	VkResult CreateDebugReportCallbackExt(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo,
+		const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
+	{
+		auto func = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+		if (func != nullptr)
+			return func(instance, pCreateInfo, pAllocator, pCallback);
+		else
+			return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	/*
+	* 选择一个物理设备（显卡）
+	* 此处注意是在一个instance上搜索所有的Physical Device，也就是说instance更像是对我们允许的平台的抽象，类似于OpenCL中的platform
+	*/
+	void pickPhysicalDevice()
+	{
+		uint32_t physicalDeviceCount = 0;
+		vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);			// 首先获取系统中一共有多少个physical device
+		if (physicalDeviceCount == 0)
+			throw std::runtime_error("failed to find GPUs with vulkan support!");
+		std::vector<VkPhysicalDevice> phyDevices(physicalDeviceCount);					// 动态分配相应数量的内存用来存放physical device对象
+		vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, phyDevices.data());	// 获取physical device对象，保存到动态分配的内存中
+
+		std::multimap<int, VkPhysicalDevice> candidates;
+
+		for (const auto& device : phyDevices)
+		{
+			int score = rateDeviceSuitable(device);
+			candidates.insert(std::make_pair(score, device));
+		}
+
+		if (candidates.rbegin()->first > 0)		// 根据candidate中的第一个元素的值进行逆向排序，选择第一个作为我们使用的物理设备
+			physicalDevice = candidates.rbegin()->second;
+		else
+			throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	// 判断一个物理设备（physical device）是否满足我们的使用需求
+	bool isDeviceSuitable(VkPhysicalDevice phyDevice)
+	{
+		/*
+		VkPhysicalDeviceProperties phyDeviceProperties;
+		VkPhysicalDeviceFeatures phyDeviceFeatures;
+		vkGetPhysicalDeviceProperties(phyDevice, &phyDeviceProperties);
+		std::cout << phyDeviceProperties.deviceName << std::endl;			// 在我的电脑中输出的是：GeForce GTX 960M
+		vkGetPhysicalDeviceFeatures(phyDevice, &phyDeviceFeatures);
+
+		// 只有当该设备是独立显卡，且支持几何着色，才算是符合使用要求的物理设备
+		return (phyDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && (phyDeviceFeatures.geometryShader);
+		// VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU表示独立显卡
+		// VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU表示集成显卡
+		*/
+
+		QueueFamilyIndices indices = findQueueFamilies(phyDevice);	// 检查该物理设备上的queue family是否支持我们的使用要求（graphics处理）
+
+		return indices.isComplete();
+	}
+
+	// 判断一个物理设备是否符合我们的使用要求，且给出一个评分权值
+	int rateDeviceSuitable(VkPhysicalDevice phyDevice)
+	{
+		VkPhysicalDeviceProperties phyDeviceProperties;
+		VkPhysicalDeviceFeatures phyDeviceFeatures;
+		vkGetPhysicalDeviceProperties(phyDevice, &phyDeviceProperties);
+		vkGetPhysicalDeviceFeatures(phyDevice, &phyDeviceFeatures);
+
+		int score = 0;
+		if (phyDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+			score += 1000;
+
+		score += phyDeviceProperties.limits.maxImageDimension2D;
+
+		if (!phyDeviceFeatures.geometryShader)
+			return 0;
+
+		return score;
+	}
+
+	/*
+	* 获取一个物理设备上支持的队列簇，并标记队列簇是否满足我们的使用需求
+	*/
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice phyDevice)
+	{
+		QueueFamilyIndices indices;
+		uint32_t queueFamilyPropertyCount = 0;
+
+		// 获取一个物理设备上支持的队列簇（Queue Family）
+		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyPropertyCount, nullptr);
+		std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyPropertyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyPropertyCount, queueFamilyProperties.data());
+
+		int i = 0;
+		for(const auto& queueFamily : queueFamilyProperties)
+		{
+			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)	// 在该物理设备上搜索所有queue family
+				indices.graphicsFamily = i;														// 一旦找到一个存在queue的，且该queue famliy支持graphics，
+																								// 就标记为我们要使用的queue family
+			if (indices.isComplete())
+				break;
+
+			i++;
+		}
+
+		return indices;
+	}
+};
+
+
+int main()
+{
+	HelloTriangleApplication app;
+
+	try {
+		app.run();
+	}
+	catch (const std::runtime_error& e)
+	{
+		std::cerr << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+	system("pause");
+	return EXIT_SUCCESS;
+}
+
+
+
+在该部分中，Physical Device表示的是我们PC上的显卡。
+在宏定义中，VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU表示独立显卡
+		   VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU表示集成显卡
+创建Physical Device对象需要先搜索系统中有多少个Physical Device，然后动态分配内存用来存放这些对象
+在创建Physical Device之后，可以通过vkGetPhysicalDeviceProperties和vkGetPhysicalDeviceFeatures两个调用获取Physical Device的一些特性，来查看是否满足我们的使用要求
+
+接下来是在我们选中的Physical Device上搜索队列簇（Queue Family）。不同的队列簇能够传输给GPU的命令不同的，有的只能传输计算命令，有的只能传输内存操作命令，有的都可以。
+我们需要通过vkGetPhysicalDeviceQueueFamilyProperties调用来获取Physical Device上的所有队列簇对象，从而获取不同队列簇的特征

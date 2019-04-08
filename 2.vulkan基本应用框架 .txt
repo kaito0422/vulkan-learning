@@ -1,0 +1,84 @@
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include <iostream>
+#include <stdexcept>
+#include <functional>
+
+const int WIDTH = 800;
+const int HEIGHT = 600;
+
+
+class HelloTriangleApplication {		// 构建一个类，用于抽象一个vulkan应用
+public:
+	void run()
+	{
+		initWindow();
+		initVulkan();
+		mainLoop();
+		cleanup();
+	}
+
+private:						// private中包含了vulkan应用需要的变量和函数
+	GLFWwindow *window;			// 该window变量是从GLFW库中创建的，该库支持vulkan；而window变量在创建后就对应一个窗口（win10中弹出的一个窗口）
+
+	void initVulkan()			// 初始化vulkan，这里还没有做任何初始化
+	{
+
+	}
+
+	void mainLoop()				// 用于事件循环；此处为当window窗口没有关闭时，就一直处理处在queue中的events
+	{
+		while (!glfwWindowShouldClose(window))
+		{
+			glfwPollEvents();
+		}
+	}
+
+	void cleanup()				// 释放事前创建的变量，关闭GLFW
+	{
+		glfwDestroyWindow(window);
+
+		glfwTerminate();
+	}
+
+	void initWindow()			// 从GLFWku中创建并初始化一个窗口
+	{
+		glfwInit();
+
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);		// 该函数用来设置创建窗口的信息，在下面的glfwCreatewindow函数用到
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+		window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-kaito", nullptr, nullptr);
+	}
+};
+
+int main()
+{
+	HelloTriangleApplication app;
+
+	try {
+		app.run();
+	}
+	catch (const std::runtime_error& e)
+	{
+		std::cerr << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+
+	return EXIT_SUCCESS;
+}
+
+
+对vulkan使用的基本框架
+在这里创建了一个vulkan应用的类HelloTriangleApplication，我们用该类创建一个vulkan应用的对象，执行成员函数run()即可
+在成员函数run()中，分为如下几步：
+    // 用glfw库初始化一个能在windows上显示的窗口。该步骤本身和vulkan没有关系，但是glfw支持vulkan，我们之后需要把vulkan处理后的数据（图形）进行显示，就需要用到窗口来显示
+    initWindow();
+    // 初始化vulkan，在本例中还没有做任何初始化处理
+	initVulkan();
+    // 处理事件
+	mainLoop();
+    // 释放之前申请的资源
+	cleanup();

@@ -1,0 +1,186 @@
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include <iostream>
+#include <stdexcept>
+#include <functional>
+
+const int WIDTH = 800;
+const int HEIGHT = 600;
+
+
+class HelloTriangleApplication {
+public:
+	void run()
+	{
+		initWindow();
+		initVulkan();
+		mainLoop();
+		cleanup();
+	}
+
+private:
+	GLFWwindow *window;
+	VkInstance instance;
+
+	void initVulkan()
+	{
+		createInstance();		// 该函数用于创建一个vulkan instance
+	}
+
+	void mainLoop()
+	{
+		while (!glfwWindowShouldClose(window))
+		{
+			glfwPollEvents();
+		}
+	}
+
+	void cleanup()
+	{
+		vkDestroyInstance(instance, nullptr);	// 释放instance
+		glfwDestroyWindow(window);
+
+		glfwTerminate();
+	}
+
+	void initWindow()
+	{
+		glfwInit();
+
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+		window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-kaito", nullptr, nullptr);
+	}
+
+	void createInstance()	//  创建一个vulkan instance
+	{
+		/*
+		* 通过vulkan使用GPU，需要先通过vulkan API创建一个instance，之后对GPU的操作都是在该instance上完成的
+		* 创建一个instance，然后在该instance上做一个应用。则我们需要先配置一下这些信息
+		* 首先配置在该instance上要执行的应用的信息；
+		* 然后根据应用的信息，配置instance的信息
+		* 最后根据instance信息创建对应的instance实例
+		*/
+		VkApplicationInfo appInfo = { };						// 创建一个应用信息
+		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;		// sType用于配置是什么类型的信息
+		appInfo.pNext = nullptr;								// pNext可用于指向特定的扩展结构，默认nullptr
+		appInfo.pApplicationName = "Hello kaito";			
+		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.pEngineName = "No Engine";
+		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.apiVersion = VK_API_VERSION_1_0;
+
+		// 该结构用于告诉vulkan驱动程序，我们需要哪些extension和validation
+		VkInstanceCreateInfo inst_info = { };					// 创建一个instance信息
+		inst_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+		inst_info.pApplicationInfo = &appInfo;					// 添加刚才创建的要在instance上执行的应用的info
+
+		unsigned int glfwExtensionCount = 0;
+		const char** glfwExtensions;
+		// 当为GLFW window创建vulkan surface时，该函数返回一个vulkan instance扩展的字符串名称
+		// 函数返回glfwExtensionCount个字符串，每个字符串表示glfw支持的一种vulkan扩展的名字
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		inst_info.enabledExtensionCount = glfwExtensionCount;		// 填写函数返回得到的扩展信息
+		inst_info.ppEnabledExtensionNames = glfwExtensions;
+		// 显示glfw支持的扩展
+		std::cout << "glfw support extension number: " << glfwExtensionCount << std::endl;
+		for(int i = 0; i < glfwExtensionCount; i++)
+			std::cout <<  "\t" << i << " " << glfwExtensions[i] << std::endl;
+
+		inst_info.enabledLayerCount = 0;
+
+		uint32_t vkExtNum = 0;
+		VkExtensionProperties *vkExtName;
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, nullptr);
+		vkExtName = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * vkExtNum);
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, vkExtName);
+		// 显示vulkan支持的扩展
+		std::cout << "vulkan support extension number: " << vkExtNum << std::endl;
+		for(int i = 0; i < vkExtNum; i++)
+			std::cout << "\t" << i << " " << vkExtName[i].extensionName << std::endl;
+
+		VkResult res = vkCreateInstance(&inst_info, nullptr, &instance);		// 创建一个vulkan instance实例
+		if (res != VK_SUCCESS)
+			throw std::runtime_error("failed to create instance!");
+		else
+			std::cout << "instance create success!" << std::endl;
+
+		free(vkExtName);
+	}
+};
+
+
+int main()
+{
+	HelloTriangleApplication app;
+
+	try {
+		app.run();
+	}
+	catch (const std::runtime_error& e)
+	{
+		std::cerr << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+
+	return EXIT_SUCCESS;
+}
+
+
+整个硬件到软件的框架为：
+    GPU -> vulkan API -> instance -> vulkan app
+    windows -> GLFW -> GLFW window
+
+所以创建vulkan instance的步骤为：
+    1. 设置vulkan app信息
+    2. 设置vulkan instance信息（需要包含vulkan app信息 + glfw支持多少extension）
+    3. 创建vulkan instance
+
+其中
+
+下面这段代码就是获取GLFW支持的extension
+        unsigned int glfwExtensionCount = 0;
+		const char** glfwExtensions;
+		// 当为GLFW window创建vulkan surface时，该函数返回一个vulkan instance扩展的字符串名称
+		// 函数返回glfwExtensionCount个字符串，每个字符串表示glfw支持的一种vulkan扩展的名字
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		inst_info.enabledExtensionCount = glfwExtensionCount;		// 填写函数返回得到的扩展信息
+		inst_info.ppEnabledExtensionNames = glfwExtensions;
+		// 显示glfw支持的扩展
+		std::cout << "glfw extension number: " << glfwExtensionCount << std::endl;
+		for(int i = 0; i < glfwExtensionCount; i++)
+			std::cout <<  "\t" << i << " " << glfwExtensions[i] << std::endl;
+
+下面这段代码是获取vulkan支持的extension
+        uint32_t vkExtNum = 0;
+		VkExtensionProperties *vkExtName;
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, nullptr);
+		vkExtName = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * vkExtNum);
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, vkExtName);
+		// 显示vulkan支持的扩展
+		std::cout << "vulkan support extension number: " << vkExtNum << std::endl;
+		for(int i = 0; i < vkExtNum; i++)
+			std::cout << "\t" << i << " " << vkExtName[i].extensionName << std::endl;
+
+在我的电脑中运行得到的结果是：
+glfw support extension number: 2
+        0 VK_KHR_surface                    *
+        1 VK_KHR_win32_surface              *
+vulkan support extension number: 12
+        0 VK_EXT_debug_report
+        1 VK_EXT_display_surface_counter
+        2 VK_KHR_get_physical_device_properties2
+        3 VK_KHR_get_surface_capabilities2
+        4 VK_KHR_surface                    *
+        5 VK_KHR_win32_surface              *
+        6 VK_KHR_device_group_creation
+        7 VK_KHR_external_fence_capabilities
+        8 VK_KHR_external_memory_capabilities
+        9 VK_KHR_external_semaphore_capabilities
+        10 VK_NV_external_memory_capabilities
+        11 VK_EXT_debug_utils
+
+可见GLFW和vulkan都支持的为VK_KHR_surface 和 VK_KHR_win32_surface

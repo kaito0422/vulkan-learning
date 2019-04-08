@@ -1,0 +1,125 @@
+        /* Vertex input */
+		// 因为我们将顶点数据硬编码到vertex shader中了，所以这里的结构体不用去添加（只写0或nullptr）
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};		// 用于描述顶点数据的格式
+		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vertexInputInfo.vertexBindingDescriptionCount = 0;				// Binding表示数据的间隙，确定数据是每个顶点或者是每个instance
+		vertexInputInfo.pVertexBindingDescriptions = nullptr;
+		vertexInputInfo.vertexAttributeDescriptionCount = 0;			// Attribute描述将要进行绑定及加载熟悉的顶点着色器中的相关属性
+		vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+		/* Input assembly */
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};		// 用于描述顶点数据是用什么类型的集合拓扑绘制，以及是否启用顶点
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;	// 三点成面，顶点不共用
+		inputAssembly.primitiveRestartEnable = VK_FALSE;
+		// VK_PRIMITIVE_TOPOLOGY_POINT_LIST: 顶点到点
+		// VK_PRIMITIVE_TOPOLOGY_LINE_LIST : 两点成线，顶点不共用
+		// VK_PRIMITIVE_TOPOLOGY_LINE_STRIP : 两点成线，每个线段的结束顶点作为下一个线段的开始顶点
+		// VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST : 三点成面，顶点不共用
+		// VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : 每个但教训的第二个、第三个顶点都作为下一个三角形的前两个顶点
+
+		/* Viewport and scissors */
+		VkViewport viewport = {};								// viewport用于描述framebuffer渲染输出结果的目标区域
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = (float)swapChainExtent.width;
+		viewport.height = (float)swapChainExtent.height;
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		VkRect2D scissor = {};									// scissor用于对输出图像进行剪切
+		scissor.offset = { 0, 0 };
+		scissor.extent = swapChainExtent;
+		VkPipelineViewportStateCreateInfo viewportStates = {};	// 创建viewport state信息
+		viewportStates.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportStates.viewportCount = 1;
+		viewportStates.pViewports = &viewport;
+		viewportStates.scissorCount = 1;
+		viewportStates.pScissors = &scissor;
+
+		/* Rasterization */
+		VkPipelineRasterizationStateCreateInfo rasterizer = {};	// 光栅化通过顶点着色器及具体的几何算法将顶点进行塑形，并将图形传递到片段着色器进行着色工作
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.depthClampEnable = VK_FALSE;				// 设置为VK_TRUE，超过远近裁剪面的片元会进行收敛，而不是丢弃它们
+		rasterizer.rasterizerDiscardEnable = VK_FALSE;		// 置为VK_TRUE，那么几何图元永远不会传递到光栅化阶段
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth = 1.0f;
+		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;		// 用于决定面裁剪的类型方式
+		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;		// 用于描述作为front-facing面的顶点的顺序，可以是顺时针也可以是逆时针
+		// 光栅化可以通过添加常量或者基于片元的斜率来更改深度值
+		rasterizer.depthBiasEnable = VK_FALSE;
+		rasterizer.depthBiasConstantFactor = 0.0f;
+		rasterizer.depthBiasClamp = 0.0f;
+		rasterizer.depthBiasSlopeFactor = 0.0f;
+		// polygonMode决定几何产生图片的内容
+		// VK_POLYGON_MODE_FILL: 多边形区域填充
+		// VK_POLYGON_MODE_LINE: 多边形边缘线框绘制
+		// VK_POLYGON_MODE_POINT : 多边形顶点作为描点绘制
+
+		/* Multisampling */
+		VkPipelineMultisampleStateCreateInfo multisampling = {};		// 多重采样时抗锯齿（anti-aliasing）的一种实现
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.sampleShadingEnable = VK_FALSE;
+		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		multisampling.minSampleShading = 1.0f;
+		multisampling.pSampleMask = nullptr;
+		multisampling.alphaToCoverageEnable = VK_FALSE;
+		multisampling.alphaToOneEnable = VK_FALSE;
+		// 所谓多重采样是抗锯齿anti-aliasing的一种实现
+		// 它通过组合多个多边形的片段着色器结果，光栅化到同一个像素
+
+		/* Depth and stencil testing */
+
+		/* Color blending */
+		VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
+		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		colorBlendAttachment.blendEnable = VK_FALSE;
+		colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+		colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+		// finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
+		// finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
+		// 该配置没有使用颜色混合，使用颜色混合可参照如下配置：
+		// colorBlendingAttachment.blendEnable = VK_TRUE;
+		// colorBlendingAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		// colorBlendingAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		// colorBlendingAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		// colorBlendingAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		// colorBlendingAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		// colorBlendingAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+		// 按照以上配置，颜色混合效果为：
+		// finalColor.rgb = newAlpha * newColor.rgb + (1 - newAlpha) * oldColor.rgb;
+		// finalColor.a = newAlpha.a;
+		VkPipelineColorBlendStateCreateInfo colorBlending = {};
+		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlending.logicOpEnable = VK_FALSE;
+		colorBlending.logicOp = VK_LOGIC_OP_COPY;
+		colorBlending.attachmentCount = 1;
+		colorBlending.pAttachments = &colorBlendAttachment;
+		colorBlending.blendConstants[0] = 0.0f;
+		colorBlending.blendConstants[1] = 0.0f;
+		colorBlending.blendConstants[2] = 0.0f;
+		colorBlending.blendConstants[3] = 0.0f;
+		
+		/* Dynamic state */
+		VkDynamicState dynamicStates[] = {
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_LINE_WIDTH
+		};
+		VkPipelineDynamicStateCreateInfo dynamicState = {};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates = dynamicStates;
+		// 之前创建的一些结构体的状态可以在运行时动态修改，而不必重新创建
+
+		/* Pipeline layout */
+		VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pipelineLayoutInfo.setLayoutCount = 0;
+		pipelineLayoutInfo.pSetLayouts = nullptr;
+		pipelineLayoutInfo.pushConstantRangeCount = 0;
+		pipelineLayoutInfo.pPushConstantRanges = nullptr;
+		if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+			throw std::runtime_error("failed to create pipeline layout!");

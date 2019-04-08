@@ -1,0 +1,668 @@
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include <iostream>
+#include <stdexcept>
+#include <functional>
+#include <vector>
+#include <map>
+#include <set>
+#include <string.h>
+#include <algorithm>
+
+const int WIDTH = 800;
+const int HEIGHT = 600;
+
+const std::vector<const char *> validationLayers = { "VK_LAYER_LUNARG_standard_validation" };		// 预先设定的Validation Layer
+const std::vector<const char *> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };				// 预先设定swapchain extension
+
+#ifdef NDEBUG		// 配置宏来确定是否启用Validation Layer
+const bool enableValidationLayers = false;
+#else
+const bool enableValidationLayers = true;
+#endif
+
+// 队列簇类型支持检查结构
+struct QueueFamilyIndices {
+	int graphicsFamily = -1;
+	int presentFamily = -1;		// presentation是一个队列的特性功能，找到支持presentation的队列簇，就能够把图像呈现到surface中
+
+	bool isComplete() {
+		return graphicsFamily >= 0 && presentFamily >= 0;
+	}
+};
+
+// 交换链支持检查结构
+struct SwapChainSupportDetails {
+	VkSurfaceCapabilitiesKHR capabilities;			// 交换链的容量（max/min number of images in swapchain, max/min width and height of images）
+	std::vector<VkSurfaceFormatKHR> formats;		// 交换链中传输给surface的格式（pixel，color space）
+	std::vector<VkPresentModeKHR> presentModes;
+};
+
+class HelloTriangleApplication {
+public:
+	void run()
+	{
+		initWindow();
+		initVulkan();
+		mainLoop();
+		cleanup();
+	}
+
+private:
+	GLFWwindow *window;
+	VkInstance instance;	// instance相当于对我们运行的平台的抽象
+	VkDebugReportCallbackEXT callback;	// 用于设置vulkan debug的回调函数
+	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;	// 用于保存选择的物理设备（显卡）
+	VkDevice logicalDevice;	// 逻辑设备
+	VkQueue graphicsQueue;	// 逻辑设备上使用的queue
+	VkQueue presentQueue;	// 能够支持surface presentation的queue
+	VkSurfaceKHR surface;	// 将vulkan的渲染效果呈现到屏幕上需要利用surface连接到glfw窗体中
+
+	// 交换链相关变量
+	VkSwapchainKHR swapChain;				// 交换链
+	std::vector<VkImage> swapChainImages;	// 在交换链中的图像
+	VkFormat swapChainImageFormat;			// 交换链中图像的格式
+	VkExtent2D swapChainExtent;				// 交换链中图像的分辨率
+
+	// 用于保存图像视图
+	std::vector<VkImageView> swapChainImageViews;
+
+	void initVulkan()
+	{
+		createInstance();
+	//	setupDebugCallback();
+		createSurface();
+		pickPhysicalDevice();
+		createLogicalDevice();
+		createSwapChain();
+		createImageViews();
+	}
+
+	void mainLoop()
+	{
+		while (!glfwWindowShouldClose(window))
+		{
+			glfwPollEvents();
+		}
+	}
+
+	void cleanup()
+	{
+		for (size_t i = 0; i < swapChainImageViews.size(); i++)
+			vkDestroyImageView(logicalDevice, swapChainImageViews[i], nullptr);
+		vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+		vkDestroyDevice(logicalDevice, nullptr);
+		vkDestroySurfaceKHR(instance, surface, nullptr);
+		vkDestroyInstance(instance, nullptr);
+		glfwDestroyWindow(window);
+
+		glfwTerminate();
+	}
+
+	void initWindow()
+	{
+		glfwInit();
+
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+		window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan-kaito", nullptr, nullptr);
+	}
+
+	void createInstance()
+	{
+		// 检查是否启用Validation Layer，以及系统是否支持我们需要的Validation Layer
+		if (enableValidationLayers && !checkValidationLayerSupport())
+			throw std::runtime_error("validation layers requested, but not available!");
+
+		// 目前为止，这部分设定都是固定的
+		VkApplicationInfo appInfo = { };
+		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+		appInfo.pNext = nullptr;
+		appInfo.pApplicationName = "Hello kaito";			
+		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.pEngineName = "No Engine";
+		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+		appInfo.apiVersion = VK_API_VERSION_1_0;
+
+		VkInstanceCreateInfo inst_info = { };
+		inst_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+		inst_info.pApplicationInfo = &appInfo;
+
+		// 检查是否启用Validation Layer
+		if (enableValidationLayers)
+		{
+			inst_info.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+			inst_info.ppEnabledLayerNames = validationLayers.data();
+		}
+		else
+			inst_info.enabledLayerCount = 0;
+
+
+		// 当为GLFW window创建vulkan surface时，该函数返回一个vulkan instance扩展的字符串名称
+		// 函数返回glfwExtensionCount个字符串，每个字符串表示glfw支持的一种vulkan扩展的名字
+		//		unsigned int glfwExtensionCount = 0;
+		//		const char** glfwExtensions;
+		//		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		auto extensions = getRequiredExtensions();		// 查询glfw支持的扩展
+		inst_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());		// 填写函数返回得到的扩展信息
+		inst_info.ppEnabledExtensionNames = extensions.data();
+		// 显示glfw支持的扩展
+		std::cout << "glfw support extension number: " << inst_info.enabledExtensionCount << std::endl;
+		for(int i = 0; i < inst_info.enabledExtensionCount; i++)
+			std::cout <<  "\t" << i << " " << inst_info.ppEnabledExtensionNames[i] << std::endl;
+		
+		uint32_t vkExtNum = 0;
+		VkExtensionProperties *vkExtName;
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, nullptr);
+		vkExtName = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * vkExtNum);
+		vkEnumerateInstanceExtensionProperties(nullptr, &vkExtNum, vkExtName);
+		std::cout << "vulkan support extension number: " << vkExtNum << std::endl;
+		for(int i = 0; i < vkExtNum; i++)
+			std::cout << "\t" << i << " " << vkExtName[i].extensionName << std::endl;
+
+		VkResult res = vkCreateInstance(&inst_info, nullptr, &instance);
+		if (res != VK_SUCCESS)
+			throw std::runtime_error("failed to create instance!");
+		else
+			std::cout << "instance create success!" << std::endl;
+
+		free(vkExtName);
+	}
+
+	bool checkValidationLayerSupport()		// 检查系统是否支持我们预先设定的Validation Layer（检验层）
+	{
+		uint32_t layerCount = 0;
+		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+		if (layerCount == 0)
+			return false;
+
+		std::vector<VkLayerProperties> availableLayers(layerCount);
+		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());	// 枚举系统支持的所有validation layer
+
+		std::cout << "Available Validation Layer in the system :" << std::endl;
+		for (int i = 0; i < layerCount; i++)
+		{
+			std::cout << "\t" << i << " " << availableLayers[i].layerName;
+			for (int j = strlen(availableLayers[i].layerName); j < 33; j++)
+				std::cout << " ";
+			std::cout << "\t" << availableLayers[i].description << std::endl;
+		}
+
+		for (const char *layerName : validationLayers)
+		{
+			bool layerFound = false;
+
+			for(const auto& layerProperties : availableLayers)
+				if (strcmp(layerName, layerProperties.layerName) == 0)
+				{
+					layerFound = true;
+					break;
+				}
+
+			if (!layerFound)
+				return false;
+		}
+
+		return true;
+	}
+
+	std::vector<const char*> getRequiredExtensions()	// 获取glfw支持的extension
+	{
+		std::vector<const char*> extensions;
+
+		unsigned int glfwExtensionCount = 0;
+		const char** glfwExtensions;
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+		for (unsigned int i = 0; i < glfwExtensionCount; i++)
+			extensions.push_back(glfwExtensions[i]);
+
+		if (enableValidationLayers)
+			extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+
+		return extensions;
+	}
+
+	/*
+	* 该函数的作用是Validation Layer的回调函数，当Validation Layer发生检验错误时，应当调用该函数
+	* flags表示指定消息的类型(uint32_t)
+	*		VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+	*		VK_DEBUG_REPORT_WARNING_BIT_EXT
+	*		VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+	*		VK_DEBUG_REPORT_ERROR_BIT_EXT
+	*		VK_DEBUG_REPORT_DEBUG_BIT_EXT
+	* objType表示消息主体对象的类型，比如obj是VkPhysicalDevice，则objType就是VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT
+	函数返回一个布尔值，表示触发该校验错误时，是否该停止vulkan调用（一般总是返回VK_FALSE）
+	*/
+	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+		VkDebugReportFlagsEXT flags,			// 指定消息的类型
+		VkDebugReportObjectTypeEXT objType,		// 
+		uint64_t obj,
+		size_t location,
+		int32_t code,
+		const char* layerPrefix,
+		const char* msg,
+		void* userData)
+	{
+		std::cerr << "Validation Layer: " << msg << std::endl;
+
+		return VK_FALSE;
+	}
+
+	// 设置回调函数
+	void setupDebugCallback()
+	{
+		if (!enableValidationLayers) return;
+
+		VkDebugReportCallbackCreateInfoEXT createInfo = { };
+		createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+		createInfo.flags = VK_DEBUG_REPORT_DEBUG_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+		createInfo.pfnCallback = debugCallback;		// 设置为上面编写的回调函数
+		
+		if (CreateDebugReportCallbackExt(instance, &createInfo, nullptr, &callback) != VK_SUCCESS)
+			throw std::runtime_error("failed to set up debug callback!");
+	}
+
+	VkResult CreateDebugReportCallbackExt(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo,
+		const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
+	{
+		auto func = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+		if (func != nullptr)
+			return func(instance, pCreateInfo, pAllocator, pCallback);
+		else
+			return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	/*
+	* 选择一个物理设备（显卡）
+	* 此处注意是在一个instance上搜索所有的Physical Device，也就是说instance更像是对我们允许的平台的抽象，类似于OpenCL中的platform
+	*/
+	void pickPhysicalDevice()
+	{
+		uint32_t physicalDeviceCount = 0;
+		vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);			// 首先获取系统中一共有多少个physical device
+		if (physicalDeviceCount == 0)
+			throw std::runtime_error("failed to find GPUs with vulkan support!");
+		std::vector<VkPhysicalDevice> phyDevices(physicalDeviceCount);					// 动态分配相应数量的内存用来存放physical device对象
+		vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, phyDevices.data());	// 获取physical device对象，保存到动态分配的内存中
+
+		std::multimap<int, VkPhysicalDevice> candidates;
+
+		for (const auto& pdevice : phyDevices)
+		{
+			int score = rateDeviceSuitable(pdevice);
+			candidates.insert(std::make_pair(score, pdevice));
+		}
+
+		if (candidates.rbegin()->first > 0)		// 根据candidate中的第一个元素的值进行逆向排序，选择第一个作为我们使用的物理设备
+			physicalDevice = candidates.rbegin()->second;
+		else
+			throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	// 判断一个物理设备（physical device）是否满足我们的使用需求
+	bool isDeviceSuitable(VkPhysicalDevice phyDevice)
+	{
+		/*
+		VkPhysicalDeviceProperties phyDeviceProperties;
+		VkPhysicalDeviceFeatures phyDeviceFeatures;
+		vkGetPhysicalDeviceProperties(phyDevice, &phyDeviceProperties);
+		std::cout << phyDeviceProperties.deviceName << std::endl;			// 在我的电脑中输出的是：GeForce GTX 960M
+		vkGetPhysicalDeviceFeatures(phyDevice, &phyDeviceFeatures);
+
+		// 只有当该设备是独立显卡，且支持几何着色，才算是符合使用要求的物理设备
+		return (phyDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && (phyDeviceFeatures.geometryShader);
+		// VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU表示独立显卡
+		// VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU表示集成显卡
+		*/
+
+		QueueFamilyIndices indices = findQueueFamilies(phyDevice);	// 检查该物理设备上的queue family是否支持我们的使用要求（graphics处理）
+
+		bool extensionSupported = checkDeviceExtensionSupoort(phyDevice);	// 检查物理设备是否支持交换链
+
+		bool swapChainAdequate = false;
+		if (extensionSupported)		// 在物理设备支持交换链的前提下
+		{
+			SwapChainSupportDetails swapChainSupport = querySwapChainSupport(phyDevice);		// 获取交换链的细节信息
+			swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();	// 判断交换链是否满足我们的使用需求
+		}
+		
+
+		return indices.isComplete() && extensionSupported && swapChainAdequate;
+	}
+
+	// 判断一个物理设备是否符合我们的使用要求，且给出一个评分权值
+	int rateDeviceSuitable(VkPhysicalDevice phyDevice)
+	{
+		VkPhysicalDeviceProperties phyDeviceProperties;
+		VkPhysicalDeviceFeatures phyDeviceFeatures;
+		vkGetPhysicalDeviceProperties(phyDevice, &phyDeviceProperties);
+		vkGetPhysicalDeviceFeatures(phyDevice, &phyDeviceFeatures);
+
+		int score = 0;
+		if (phyDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+			score += 1000;
+
+		score += phyDeviceProperties.limits.maxImageDimension2D;
+
+		if (!phyDeviceFeatures.geometryShader)
+			return 0;
+
+		return score;
+	}
+
+	/*
+	* 获取一个物理设备上支持的队列簇，并标记队列簇是否满足我们的使用需求
+	*/
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice phyDevice)
+	{
+		QueueFamilyIndices indices;
+		uint32_t queueFamilyPropertyCount = 0;
+
+		// 获取一个物理设备上支持的队列簇（Queue Family）
+		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyPropertyCount, nullptr);
+		std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyPropertyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(phyDevice, &queueFamilyPropertyCount, queueFamilyProperties.data());
+
+		int i = 0;
+		for(const auto& queueFamily : queueFamilyProperties)	// 在该物理设备上搜索所有queue family
+		{
+			if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+				indices.graphicsFamily = i;									// 一旦找到一个存在queue的，且该queue famliy支持graphics
+																			// 就标记为我们要使用的queue family
+
+			VkBool32 presentSupport = false;
+			vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &presentSupport);	// 判断是否支持surface presentation
+			if (queueFamily.queueCount > 0 && presentSupport)
+				indices.presentFamily = i;
+
+			if (indices.isComplete())
+				break;
+
+			i++;
+		}
+
+		return indices;
+	}
+
+	/*
+	* 创建一个逻辑设备
+	*/
+	void createLogicalDevice()
+	{
+		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		std::set<int> uniqueQueueFamilies = { indices.graphicsFamily, indices.presentFamily };
+
+		// 设置逻辑设备使用的队列簇（queue family）的信息
+		float queuePriority = 1.0f;
+		for (int queueFamily : uniqueQueueFamilies)
+		{
+			VkDeviceQueueCreateInfo queueCreateInfo = { };
+			queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;						// 指明使用第几个queue
+			queueCreateInfo.queueCount = 1;										// 我们在该physical device上只使用一个queue	
+			queueCreateInfo.pQueuePriorities = &queuePriority;					// vulkan允许使用0.0到1.0之间的浮点数来表示queue的优先级
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
+
+		VkPhysicalDeviceFeatures deviceFeatures = { };					// 这部分特征还没有定义
+
+		// 设置创建逻辑设备的配置信息
+		VkDeviceCreateInfo deviceInfo = { };
+		// 添加队列信息
+		deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+		deviceInfo.pQueueCreateInfos = queueCreateInfos.data();								// 此处添加的队列信息不止一个
+		deviceInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+		// 添加feature
+		deviceInfo.pEnabledFeatures = &deviceFeatures;
+		// 添加使用的扩展信息（swapchain）
+		deviceInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+		deviceInfo.ppEnabledExtensionNames = deviceExtensions.data();
+		if (enableValidationLayers)
+		{
+			deviceInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+			deviceInfo.ppEnabledLayerNames = validationLayers.data();
+		}
+		else
+			deviceInfo.enabledLayerCount = 0;
+
+		// 需要在一个物理设备上创建一个对应的逻辑设备（有时候对应于一个物理设备也可以创建多个逻辑设备）
+		// 由于创建逻辑设备配置信息（deviceInfo）包括使用的队列簇的配置信息（queueInfo），因此在创建完逻辑设备之后，就自动创建了其对应使用的queue
+		if (vkCreateDevice(physicalDevice, &deviceInfo, nullptr, &logicalDevice) != VK_SUCCESS)
+			throw std::runtime_error("failed to create logical device!");
+
+		// graphicsQueue是我们自己创建的queue对象，该函数把graphicsQueue指向逻辑设备上使用的queue
+		// 第二个参数表示使用的是哪一个队列簇
+		// 第三个参数表示使用该队列簇中的第几个队列
+		vkGetDeviceQueue(logicalDevice, indices.graphicsFamily, 0, &graphicsQueue);
+		vkGetDeviceQueue(logicalDevice, indices.presentFamily, 0, &presentQueue);
+	}
+
+	/*
+	* 创建一个surafce，用于连接vulkan和glfw窗体
+	*/
+	void createSurface()
+	{
+		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
+			throw std::runtime_error("failed to create window surface!");
+	}
+
+	// 获取交换链的细节特征
+	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
+	{
+		SwapChainSupportDetails details;
+
+		// 获取交换链的容量，支持多少images在交换链中，以及交换链中图像的宽高
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+
+		// 获取交换链中传输图像的格式
+		uint32_t formatCount = 0;
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+		details.formats.resize(formatCount);		// 改变formats容器的大小，此处的作用相当于是动态分配存储formats对象的内存
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+
+		// 获取交换链中图像到surface的presentation模式
+		uint32_t presentModeCount = 0;
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
+		details.presentModes.resize(presentModeCount);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
+
+		return details;
+	}
+
+	// 检查物理设备是否支持交换链
+	bool checkDeviceExtensionSupoort(VkPhysicalDevice phyDevice)
+	{
+		uint32_t propertyCount = 0;
+		vkEnumerateDeviceExtensionProperties(phyDevice, nullptr, &propertyCount, nullptr);
+		std::vector<VkExtensionProperties> properties(propertyCount);
+		vkEnumerateDeviceExtensionProperties(phyDevice, nullptr, &propertyCount, properties.data());
+
+		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+		for (const auto& extension : properties)				// 检查是否支持swapchain
+			requiredExtensions.erase(extension.extensionName);
+
+		return requiredExtensions.empty();
+	}
+
+	// 在所有输入的surface formats中，选出我们需要的format
+	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+	{
+		// 结构体VkSurfaceFormatKHR包含两个成员变量：format和colorSpace
+		// format变量指定色彩通道和类型，比如VK_FORMAT_B8G8R8A8_UNORM表示使用B,G,R和Alpha次序的通道，且每个通道为无符号8-bit整数，总计32-bit
+		// colorSpace变量表示SRGB颜色空间是否通过VK_COLOR_SPACE_SRGB_NONLINEAR_KHR标志支持，SRGB（彩色语言协议，这里我们使用表示的RGB颜色格式
+		if (availableFormats.size() == 1 && availableFormats[0].format == VK_FORMAT_UNDEFINED)	// 如果传入的参数中只有一个VkSurfaceFormatKHR变量，且其中包含的格式未定义
+			return { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+
+		for (const auto& availableFormat : availableFormats)
+		{
+			if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+				return availableFormat;
+		}
+
+		return availableFormats[0];
+	}
+
+	// 在所有输入的surface present modes中，选择我们需要的present mode
+	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> availablePresentModes)
+	{
+		// vulkan中一共有4中present modes
+		// VK_PRESENT_MODE_IMMEDIATE_KHR	
+		//		应用程序提交的图像立即传输到屏幕呈现，这种模式会造成撕裂效果
+		// VK_PRESENT_MODE_FIFO_KHR			
+		//		交换链被看作一个队列，当显示内容需要刷新的时候，显示设备从队列的前面获取图像，并且程序将渲染完成的图像插入队列的后面
+		//		如果队列是满的程序会等待。这种规模与视频游戏的垂直同步很类似
+		// VK_PRESENT_MODE_FIFO_RELAXED_KHR		
+		//		该模式与上一个模式略有不同的地方为，如果应用程序存在延迟，即接受最后一个垂直同步信号时队列空了，将不会等待下一个垂直同步信号，而是将图像直接传送
+		//		这样做可能导致可见的撕裂效果。
+		// VK_PRESENT_MODE_MAILBOX_KHR			
+		//		这是第二种模式的变种。当交换链队列满的时候，选择新的替换旧的图像，从而替代阻塞应用程序的情形。这种模式通常用来实现三重缓冲区，
+		//		与标准的垂直同步双缓冲相比，它可以有效避免延迟带来的撕裂效果
+		VkPresentModeKHR bestMode = VK_PRESENT_MODE_FIFO_KHR;
+
+		for (const auto& availablePresentMode : availablePresentModes)
+		{
+			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+				return availablePresentMode;
+			else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
+				bestMode = availablePresentMode;
+		}
+
+		return bestMode;
+	}
+
+	// 选择交换范围（交换范围指交换链中图像的分辨率，它几乎总是等于窗体的大小）
+	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities)
+	{
+		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
+			return capabilities.currentExtent;
+		else
+		{
+			VkExtent2D actualExtent = { WIDTH, HEIGHT };
+			actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
+			actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
+
+			return actualExtent;
+		}
+	}
+
+	// 创建一个交换链
+	void createSwapChain()
+	{
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);	// 获取物理设备上支持的交换链信息
+		VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+		VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+		VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+	
+		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+		if (swapChainSupport.capabilities.minImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
+			imageCount = swapChainSupport.capabilities.maxImageCount;
+	
+		VkSwapchainCreateInfoKHR swapChainInfo = { };
+		swapChainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+		swapChainInfo.surface = surface;
+		swapChainInfo.minImageCount = imageCount;
+		swapChainInfo.imageFormat = surfaceFormat.format;
+		swapChainInfo.imageColorSpace = surfaceFormat.colorSpace;
+		swapChainInfo.imageExtent = extent;
+		swapChainInfo.imageArrayLayers = 1;									// 指定图像组成的层数（类似PS中的图层）
+		swapChainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;		// 指定在交换链中对图像进行的具体操作（在这里我们直接进行渲染）
+
+		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+		uint32_t queueFamilyIndices[] = { (uint32_t)indices.graphicsFamily, (uint32_t)indices.presentFamily };
+		if (indices.graphicsFamily != indices.presentFamily)	// 如果不存在一个队列簇存同时支持graphics处理和向surface presentation
+		{														// 即graphics处理和presentation由两个队列簇完成
+			swapChainInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;	// 图像可以被多个队列簇访问
+			swapChainInfo.queueFamilyIndexCount = 2;
+			swapChainInfo.pQueueFamilyIndices = queueFamilyIndices;
+		}
+		else					// 如果存在一个队列簇能够同时支持graphics处理和向surface presentation
+		{
+			swapChainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;		// 同一时间图像只能被一个队列簇占用
+			swapChainInfo.queueFamilyIndexCount = 0;
+			swapChainInfo.pQueueFamilyIndices = nullptr;
+		}
+
+		// 如果交换链支持(supportedTransforms in capabilities),我们可以为交换链图像指定某些转换逻辑，比如90度顺时针旋转或者水平反转
+		swapChainInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+		// 混合Alpha字段指定alpha通道是否应用与与其他的窗体系统进行混合操作。如果忽略该功能，简单的填VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+		swapChainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+		swapChainInfo.presentMode = presentMode;
+		// 如果clipped成员设置为VK_TRUE，意味着我们不关心被遮蔽的像素数据，比如由于其他的窗体置于前方时或者渲染的部分内容位于可视区域之外，
+		// 除非真的需要读取这些像素获数据进行处理，否则可以开启裁剪获得最佳性能
+		swapChainInfo.clipped = VK_TRUE;
+		swapChainInfo.oldSwapchain = VK_NULL_HANDLE;
+	
+		if (vkCreateSwapchainKHR(logicalDevice, &swapChainInfo, nullptr, &swapChain) != VK_SUCCESS)
+			throw std::runtime_error("failed to create swap chain!");
+
+		// 获取在交换链中的图像
+		vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, nullptr);
+		swapChainImages.resize(imageCount);
+		vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, swapChainImages.data());
+
+		// 获取交换链中图像的格式
+		swapChainImageFormat = surfaceFormat.format;
+		// 获取交换链中图像的像素
+		swapChainExtent = extent;
+	}
+
+	// 为交换链中的每一个图像都创建一个图像视图
+	void createImageViews()
+	{
+		// 图像视图的数量设置为交换链中图像的数量
+		swapChainImageViews.resize(swapChainImages.size());
+
+		size_t sci_size = swapChainImages.size();
+		for (size_t i = 0; i < sci_size; i++)
+		{
+			VkImageViewCreateInfo imageViewInfo = { };
+			imageViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			imageViewInfo.image = swapChainImages[i];
+			imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			imageViewInfo.format = swapChainImageFormat;
+			// component字段用于调整颜色通道的最终映射逻辑（此处都采用默认设置）
+			imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+			// subresourceRange用于描述图像的使用目标是什么，以及可以被访问的有效区域
+			imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			imageViewInfo.subresourceRange.baseMipLevel = 0;
+			imageViewInfo.subresourceRange.levelCount = 1;
+			imageViewInfo.subresourceRange.baseArrayLayer = 0;
+			imageViewInfo.subresourceRange.layerCount = 1;
+
+			if (vkCreateImageView(logicalDevice, &imageViewInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS)
+				throw std::runtime_error("failed to create image views!");
+		}
+	}
+};
+
+
+int main()
+{
+	HelloTriangleApplication app;
+
+	try {
+		app.run();
+	}
+	catch (const std::runtime_error& e)
+	{
+		std::cerr << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+	system("pause");
+	return EXIT_SUCCESS;
+}
+
+
+
+对于任意VkImage创建的对象，都需要用VkImageView对象（相当于图像的视图或容器）
+这里为交换链中的每一个图像创建一个基本视图，这些视图会在后面的内容中被作为颜色目标和渲染管线配合使用
